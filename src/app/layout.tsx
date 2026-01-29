@@ -74,8 +74,9 @@ export default function RootLayout({
                   var mode = localStorage.getItem('mise-theme');
                   if (mode === 'dark') {
                     document.documentElement.classList.add('dark');
+                  } else {
+                    document.documentElement.classList.remove('dark');
                   }
-                  // Default to light mode if no preference set
                 } catch (e) {}
               })();
             `,
