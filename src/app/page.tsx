@@ -705,22 +705,6 @@ Chicken Tacos
               </div>
             )}
 
-            {/* Shop at Store */}
-            <div className="pt-4 border-t border-stone-200 dark:border-stone-700">
-              <p className="text-sm font-medium text-stone-500 dark:text-stone-400 mb-3">Shop this list at</p>
-              <div className="flex flex-wrap gap-2">
-                {STORES.map((store) => (
-                  <button
-                    key={store.name}
-                    onClick={() => copyAndOpenStore(store.name, store.url)}
-                    className="px-4 py-2 text-sm font-medium text-stone-700 dark:text-stone-300 bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-xl hover:bg-stone-50 dark:hover:bg-stone-700 hover:border-stone-300 dark:hover:border-stone-600 transition-all"
-                  >
-                    {store.name}
-                  </button>
-                ))}
-              </div>
-              <p className="text-xs text-stone-400 dark:text-stone-500 mt-2">Copies ingredients & opens store grocery page</p>
-            </div>
           </div>
         )}
       </div>
