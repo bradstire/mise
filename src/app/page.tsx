@@ -23,14 +23,14 @@ interface SavedList {
   timestamp: number;
 }
 
-// Store search URL patterns
+// Store grocery page URLs
 const STORES = [
-  { name: 'Walmart', url: (q: string) => `https://www.walmart.com/search?q=${encodeURIComponent(q)}` },
-  { name: 'Target', url: (q: string) => `https://www.target.com/s?searchTerm=${encodeURIComponent(q)}` },
-  { name: 'Kroger', url: (q: string) => `https://www.kroger.com/search?query=${encodeURIComponent(q)}` },
-  { name: 'Amazon Fresh', url: (q: string) => `https://www.amazon.com/s?k=${encodeURIComponent(q)}&i=amazonfresh` },
-  { name: 'Instacart', url: (q: string) => `https://www.instacart.com/store/search_v3/term?term=${encodeURIComponent(q)}` },
-  { name: 'Costco', url: (q: string) => `https://www.costco.com/CatalogSearch?keyword=${encodeURIComponent(q)}` },
+  { name: 'Walmart', url: 'https://www.walmart.com/grocery' },
+  { name: 'Target', url: 'https://www.target.com/c/grocery' },
+  { name: 'Kroger', url: 'https://www.kroger.com' },
+  { name: 'Amazon Fresh', url: 'https://www.amazon.com/alm/storefront' },
+  { name: 'Instacart', url: 'https://www.instacart.com' },
+  { name: 'Costco', url: 'https://www.costco.com/grocery-household' },
 ];
 
 const AISLE_CONFIG: Record<string, { emoji: string; color: string; darkColor: string }> = {
@@ -86,6 +86,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [recentLists, setRecentLists] = useState<SavedList[]>([]);
   const [copied, setCopied] = useState(false);
+  const [storeCopied, setStoreCopied] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
 
@@ -239,6 +240,28 @@ export default function Home() {
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const copyAndOpenStore = (storeName: string, storeUrl: string) => {
+    if (!groceryList) return;
+
+    // Copy full ingredient list
+    const text = Object.entries(groceryList)
+      .filter(([, items]) => items.length > 0)
+      .map(([aisle, items]) => {
+        const aisleConfig = AISLE_CONFIG[aisle] || AISLE_CONFIG['Other'];
+        return `${aisleConfig.emoji} ${aisle.toUpperCase()}\n${items
+          .map((item) => `${item.amount} ${item.unit} ${item.name}`.trim())
+          .join('\n')}`;
+      })
+      .join('\n\n');
+
+    navigator.clipboard.writeText(text);
+    setStoreCopied(true);
+    setTimeout(() => setStoreCopied(false), 2000);
+
+    // Open store in new tab
+    window.open(storeUrl, '_blank', 'noopener,noreferrer');
   };
 
   const shareList = async () => {
@@ -686,29 +709,17 @@ Chicken Tacos
             <div className="pt-4 border-t border-stone-200 dark:border-stone-700">
               <p className="text-sm font-medium text-stone-500 dark:text-stone-400 mb-3">Shop this list at</p>
               <div className="flex flex-wrap gap-2">
-                {STORES.map((store) => {
-                  // Get unchecked items for search
-                  const uncheckedItems = Object.values(groceryList)
-                    .flat()
-                    .filter((item) => !item.checked)
-                    .slice(0, 5) // First 5 items
-                    .map((item) => item.name)
-                    .join(', ');
-                  
-                  return (
-                    <a
-                      key={store.name}
-                      href={store.url(uncheckedItems || 'groceries')}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-4 py-2 text-sm font-medium text-stone-700 dark:text-stone-300 bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-xl hover:bg-stone-50 dark:hover:bg-stone-700 hover:border-stone-300 dark:hover:border-stone-600 transition-all"
-                    >
-                      {store.name}
-                    </a>
-                  );
-                })}
+                {STORES.map((store) => (
+                  <button
+                    key={store.name}
+                    onClick={() => copyAndOpenStore(store.name, store.url)}
+                    className="px-4 py-2 text-sm font-medium text-stone-700 dark:text-stone-300 bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-xl hover:bg-stone-50 dark:hover:bg-stone-700 hover:border-stone-300 dark:hover:border-stone-600 transition-all"
+                  >
+                    {store.name}
+                  </button>
+                ))}
               </div>
-              <p className="text-xs text-stone-400 dark:text-stone-500 mt-2">Opens store search with your ingredients</p>
+              <p className="text-xs text-stone-400 dark:text-stone-500 mt-2">Copies ingredients & opens store grocery page</p>
             </div>
           </div>
         )}
@@ -734,6 +745,15 @@ Chicken Tacos
                 {Math.round(progressPercent)}% done
               </span>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Toast notification for store copy */}
+      {storeCopied && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <div className="bg-[#2D5016] dark:bg-[#87A96B] text-white dark:text-stone-900 px-6 py-3 rounded-full shadow-lg font-medium">
+            ✓ Ingredients copied!
           </div>
         </div>
       )}
