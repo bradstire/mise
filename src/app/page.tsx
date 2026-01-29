@@ -453,6 +453,35 @@ Chicken Tacos
                   <span className="font-medium">&quot;Mise en place&quot;</span> — French for &quot;everything in its place.&quot;
                 </p>
 
+                {/* Testimonial Section */}
+                <div className="pt-6">
+                  <h3 className="text-lg font-semibold text-stone-800 dark:text-stone-200 text-center mb-4">What People Are Saying</h3>
+                  <div className="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700 overflow-hidden p-6">
+                    <div className="flex flex-col md:flex-row gap-6 items-center">
+                      {/* Image */}
+                      <div className="w-full md:w-48 flex-shrink-0">
+                        <img 
+                          src="/testimonial-cary.jpg" 
+                          alt="Marry Me Chicken dish" 
+                          className="w-full h-48 md:h-48 object-cover rounded-lg"
+                        />
+                      </div>
+                      {/* Quote */}
+                      <div className="flex-1 text-center md:text-left">
+                        <svg className="w-8 h-8 text-stone-300 dark:text-stone-700 mb-3 mx-auto md:mx-0" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z" />
+                        </svg>
+                        <p className="text-stone-700 dark:text-stone-300 mb-4 italic">
+                          &quot;I used Mise to make Marry Me Chicken. The grocery list made shopping so easy—just checked items off as I went. Turned out delicious!&quot;
+                        </p>
+                        <p className="text-sm font-medium text-stone-600 dark:text-stone-400">
+                          — Cary G., Home Cook
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 {/* FAQ Section */}
                 <div className="pt-6 space-y-3">
                   <h3 className="text-lg font-semibold text-stone-800 dark:text-stone-200 text-center">FAQ</h3>
