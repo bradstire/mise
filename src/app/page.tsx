@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import HowItWorks from './components/HowItWorks';
 
 interface Ingredient {
   id: string;
@@ -404,9 +405,12 @@ Chicken Tacos
               Works with URLs, blog posts, screenshots, handwritten notes — whatever.
             </p>
 
-            {/* What is Mise? - For first-time visitors */}
+            {/* How It Works + What is Mise? - For first-time visitors */}
             {recentLists.length === 0 && (
-              <div className="pt-8 border-t border-stone-200 dark:border-stone-800 space-y-6">
+              <div className="pt-8 border-t border-stone-200 dark:border-stone-800 space-y-8">
+                {/* Interactive Demo */}
+                <HowItWorks />
+
                 <h3 className="text-lg font-semibold text-stone-800 dark:text-stone-200 text-center">What is Mise?</h3>
                 
                 <div className="grid gap-4">
