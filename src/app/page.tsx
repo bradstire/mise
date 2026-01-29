@@ -467,7 +467,7 @@ Chicken Tacos
                     <span className="text-2xl">🛒</span>
                     <div>
                       <h4 className="font-medium text-stone-800 dark:text-stone-200">Shop Smarter</h4>
-                      <p className="text-sm text-stone-500 dark:text-stone-400">Check off items as you shop. Copy to Notes or share with family. Open directly in your favorite store.</p>
+                      <p className="text-sm text-stone-500 dark:text-stone-400">Check off items as you shop. Copy to Notes or share with others.</p>
                     </div>
                   </div>
                 </div>
