@@ -72,9 +72,10 @@ export default function RootLayout({
               (function() {
                 try {
                   var mode = localStorage.getItem('mise-theme');
-                  if (mode === 'dark' || (!mode && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                  if (mode === 'dark') {
                     document.documentElement.classList.add('dark');
                   }
+                  // Default to light mode if no preference set
                 } catch (e) {}
               })();
             `,

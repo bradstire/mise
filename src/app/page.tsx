@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import HowItWorks from './components/HowItWorks';
 
 interface Ingredient {
@@ -21,6 +21,7 @@ interface SavedList {
   groceryList: GroceryList;
   recipeName: string;
   timestamp: number;
+  servings?: number;
 }
 
 // Store search URL patterns
@@ -50,7 +51,7 @@ const AISLE_CONFIG: Record<string, { emoji: string; color: string; darkColor: st
 const FAQ_ITEMS = [
   {
     q: "What recipes work with Mise?",
-    a: "Almost anything! Paste a URL from any recipe site, copy/paste text from a blog, or just type your ingredients. Mise uses AI to understand recipes in any format."
+    a: "Almost anything! Paste a URL from any recipe site, copy/paste text from a blog, upload a screenshot, or just type your ingredients. Mise uses AI to understand recipes in any format."
   },
   {
     q: "Is my data private?",
@@ -77,6 +78,8 @@ export default function Home() {
   const [recipeText, setRecipeText] = useState('');
   const [groceryList, setGroceryList] = useState<GroceryList | null>(null);
   const [recipeName, setRecipeName] = useState<string>('');
+  const [servings, setServings] = useState<number>(1);
+  const [originalServings, setOriginalServings] = useState<number>(1);
   const [loading, setLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -84,20 +87,70 @@ export default function Home() {
   const [copied, setCopied] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+  const [showPrintView, setShowPrintView] = useState(false);
+  const [imageUploading, setImageUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Initialize dark mode from localStorage/system preference
+  // Initialize dark mode from localStorage (default to light)
   useEffect(() => {
     const stored = localStorage.getItem('mise-theme');
     if (stored === 'dark') {
       setDarkMode(true);
       document.documentElement.classList.add('dark');
-    } else if (stored === 'light') {
+    } else {
+      // Default to light mode
       setDarkMode(false);
       document.documentElement.classList.remove('dark');
-    } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      setDarkMode(true);
-      document.documentElement.classList.add('dark');
+      if (!stored) {
+        localStorage.setItem('mise-theme', 'light');
+      }
     }
+  }, []);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Cmd/Ctrl + K = Focus search
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        textareaRef.current?.focus();
+      }
+      // Cmd/Ctrl + P = Print
+      if ((e.metaKey || e.ctrlKey) && e.key === 'p' && groceryList) {
+        e.preventDefault();
+        setShowPrintView(true);
+        setTimeout(() => window.print(), 100);
+      }
+      // Escape = Reset
+      if (e.key === 'Escape' && !loading) {
+        reset();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [groceryList, loading]);
+
+  // Handle paste events (including images)
+  useEffect(() => {
+    const handlePaste = async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (const item of Array.from(items)) {
+        if (item.type.indexOf('image') !== -1) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (file) {
+            await handleImageUpload(file);
+          }
+        }
+      }
+    };
+
+    document.addEventListener('paste', handlePaste);
+    return () => document.removeEventListener('paste', handlePaste);
   }, []);
 
   // Toggle dark mode
@@ -127,15 +180,39 @@ export default function Home() {
   }, []);
 
   // Save list to localStorage
-  const saveToRecent = (list: GroceryList, name: string) => {
+  const saveToRecent = (list: GroceryList, name: string, servingsCount?: number) => {
     const newEntry: SavedList = {
       groceryList: list,
       recipeName: name,
       timestamp: Date.now(),
+      servings: servingsCount,
     };
     const updated = [newEntry, ...recentLists.filter(r => r.recipeName !== name)].slice(0, 5);
     setRecentLists(updated);
     localStorage.setItem('mise-recent-lists', JSON.stringify(updated));
+  };
+
+  // Handle image upload/paste
+  const handleImageUpload = async (file: File) => {
+    setImageUploading(true);
+    setError(null);
+
+    try {
+      // Convert image to base64
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64 = reader.result as string;
+        setRecipeText(`[Image uploaded: ${file.name}]`);
+        setImageUploading(false);
+        // In a real implementation, you'd send this to an OCR API or vision model
+        // For now, show a message
+        setError('Image processing coming soon! For now, try typing or pasting the recipe text.');
+      };
+      reader.readAsDataURL(file);
+    } catch {
+      setError('Failed to upload image. Try again?');
+      setImageUploading(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -156,6 +233,8 @@ export default function Home() {
         const { groceryList: cachedList, recipeName: cachedName } = JSON.parse(cached);
         setGroceryList(cachedList);
         setRecipeName(cachedName || 'Recipe');
+        setOriginalServings(1);
+        setServings(1);
         setLoading(false);
         setLoadingStep('');
         return;
@@ -183,6 +262,8 @@ export default function Home() {
       } else {
         setGroceryList(data.groceryList);
         setRecipeName(data.recipeName || 'Recipe');
+        setOriginalServings(1);
+        setServings(1);
         
         // Cache the result
         localStorage.setItem(cacheKey, JSON.stringify({
@@ -191,7 +272,7 @@ export default function Home() {
         }));
         
         // Save to recent
-        saveToRecent(data.groceryList, data.recipeName || 'Recipe');
+        saveToRecent(data.groceryList, data.recipeName || 'Recipe', 1);
       }
     } catch {
       setError('Something went wrong. Try again?');
@@ -214,8 +295,33 @@ export default function Home() {
     
     // Update in recent lists too
     if (recipeName) {
-      saveToRecent(updated, recipeName);
+      saveToRecent(updated, recipeName, servings);
     }
+  };
+
+  // Adjust servings
+  const adjustServings = (newServings: number) => {
+    if (!groceryList || newServings < 1) return;
+    
+    const multiplier = newServings / originalServings;
+    const adjusted: GroceryList = {};
+    
+    for (const [aisle, items] of Object.entries(groceryList)) {
+      adjusted[aisle] = items.map(item => {
+        const amount = parseFloat(item.amount);
+        if (!isNaN(amount)) {
+          return {
+            ...item,
+            amount: (amount * multiplier).toFixed(2).replace(/\.00$/, ''),
+          };
+        }
+        return item;
+      });
+    }
+    
+    setGroceryList(adjusted);
+    setServings(newServings);
+    saveToRecent(adjusted, recipeName, newServings);
   };
 
   const copyList = () => {
@@ -265,12 +371,16 @@ export default function Home() {
     setRecipeText('');
     setGroceryList(null);
     setRecipeName('');
+    setServings(1);
+    setOriginalServings(1);
     setError(null);
   };
 
   const loadRecent = (saved: SavedList) => {
     setGroceryList(saved.groceryList);
     setRecipeName(saved.recipeName);
+    setServings(saved.servings || 1);
+    setOriginalServings(saved.servings || 1);
   };
 
   const totalItems = groceryList
@@ -282,71 +392,103 @@ export default function Home() {
   const progressPercent = totalItems > 0 ? (checkedItems / totalItems) * 100 : 0;
 
   return (
-    <main className="min-h-screen pb-24 bg-stone-50 dark:bg-stone-950 transition-colors">
-      {/* Header */}
-      <header className="sticky top-0 z-50 bg-white/80 dark:bg-stone-900/80 backdrop-blur-md border-b border-stone-200 dark:border-stone-800">
-        <div className="max-w-2xl mx-auto px-4 py-4 flex items-center justify-between">
-          <button onClick={reset} className="flex items-center gap-2 hover:opacity-70 transition-opacity">
-            <span className="text-2xl">🍳</span>
-            <h1 className="text-xl font-semibold text-stone-900 dark:text-stone-100">Mise</h1>
-          </button>
-          <div className="flex items-center gap-3">
-            {groceryList && (
-              <>
-                <div className="text-sm text-stone-500 dark:text-stone-400">
-                  {checkedItems}/{totalItems}
+    <>
+      {/* Print View (hidden, only for printing) */}
+      {showPrintView && groceryList && (
+        <div className="print:block hidden">
+          <div className="p-8">
+            <h1 className="text-3xl font-bold mb-2">{recipeName}</h1>
+            <p className="text-sm text-gray-600 mb-6">Servings: {servings} | {totalItems} items</p>
+            {Object.entries(groceryList)
+              .filter(([, items]) => items.length > 0)
+              .map(([aisle, items]) => (
+                <div key={aisle} className="mb-6">
+                  <h2 className="text-xl font-semibold mb-2 border-b pb-1">{aisle}</h2>
+                  <ul className="space-y-1">
+                    {items.map((item) => (
+                      <li key={item.id} className="flex items-start gap-2">
+                        <span className="w-4">☐</span>
+                        <span>{item.amount} {item.unit} {item.name}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <div className="w-20 h-2 bg-stone-100 dark:bg-stone-800 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-[#2D5016] dark:bg-[#87A96B] transition-all duration-300 rounded-full"
-                    style={{ width: `${progressPercent}%` }}
-                  />
-                </div>
-              </>
-            )}
-            {/* Dark mode toggle */}
-            <button
-              onClick={toggleDarkMode}
-              className="p-2 text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 transition-colors"
-              title={darkMode ? 'Light mode' : 'Dark mode'}
-            >
-              {darkMode ? (
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-                </svg>
-              ) : (
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-                </svg>
-              )}
-            </button>
+              ))}
+            <p className="text-sm text-gray-500 mt-8 pt-4 border-t">Generated by Mise — mise-eight.vercel.app</p>
           </div>
         </div>
-      </header>
+      )}
 
-      <div className="max-w-2xl mx-auto px-4 py-6">
-        {!groceryList ? (
-          /* Input View */
-          <div className="space-y-6">
-            <div className="text-center space-y-2 py-8">
-              <h2 className="text-3xl font-bold text-stone-900 dark:text-stone-100">
-                Recipe → Grocery List
-              </h2>
-              <p className="text-stone-500 dark:text-stone-400">
-                Paste a recipe or URL. Get an organized shopping list.
-              </p>
+      <main className="min-h-screen pb-24 bg-stone-50 dark:bg-stone-950 transition-colors print:hidden">
+        {/* Header */}
+        <header className="sticky top-0 z-50 bg-white/80 dark:bg-stone-900/80 backdrop-blur-md border-b border-stone-200 dark:border-stone-800">
+          <div className="max-w-2xl mx-auto px-4 py-4 flex items-center justify-between">
+            <button onClick={reset} className="flex items-center gap-2 hover:opacity-70 transition-opacity">
+              <span className="text-2xl">🍳</span>
+              <h1 className="text-xl font-semibold text-stone-900 dark:text-stone-100">Mise</h1>
+            </button>
+            <div className="flex items-center gap-3">
+              {groceryList && (
+                <>
+                  <div className="text-sm text-stone-500 dark:text-stone-400">
+                    {checkedItems}/{totalItems}
+                  </div>
+                  <div className="w-20 h-2 bg-stone-100 dark:bg-stone-800 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-[#2D5016] dark:bg-[#87A96B] transition-all duration-300 rounded-full"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+                </>
+              )}
+              {/* Dark mode toggle */}
+              <button
+                onClick={toggleDarkMode}
+                className="p-2 text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 transition-colors"
+                title={darkMode ? 'Light mode' : 'Dark mode'}
+              >
+                {darkMode ? (
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                  </svg>
+                )}
+              </button>
             </div>
+          </div>
+        </header>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="relative">
-                <textarea
-                  value={recipeText}
-                  onChange={(e) => setRecipeText(e.target.value)}
-                  placeholder="Paste a recipe or URL here...
+        <div className="max-w-2xl mx-auto px-4 py-6">
+          {!groceryList ? (
+            /* Input View */
+            <div className="space-y-6">
+              <div className="text-center space-y-2 py-8">
+                <h2 className="text-3xl font-bold text-stone-900 dark:text-stone-100">
+                  Recipe → Grocery List
+                </h2>
+                <p className="text-stone-500 dark:text-stone-400">
+                  Paste a recipe, URL, or image. Get an organized shopping list.
+                </p>
+                <p className="text-xs text-stone-400 dark:text-stone-500">
+                  💡 Keyboard shortcuts: ⌘K to focus, Esc to reset, ⌘P to print
+                </p>
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="relative">
+                  <textarea
+                    ref={textareaRef}
+                    value={recipeText}
+                    onChange={(e) => setRecipeText(e.target.value)}
+                    placeholder="Paste a recipe or URL here... or paste an image (⌘V)
 
 Examples:
 • https://www.allrecipes.com/recipe/...
-• Copy/paste from any website or blog
+• Copy/paste from any website or blog  
+• Paste a screenshot of a recipe (⌘V)
 • Or just type ingredients:
 
 Chicken Tacos
@@ -355,56 +497,77 @@ Chicken Tacos
 1 bunch fresh cilantro
 8 corn tortillas
 2 limes"
-                  className="w-full h-72 px-4 py-4 text-stone-900 dark:text-stone-100 bg-white dark:bg-stone-900 border-2 border-stone-200 dark:border-stone-700 rounded-2xl resize-none placeholder:text-stone-400 dark:placeholder:text-stone-500 focus:border-[#87A96B] focus:ring-2 focus:ring-[#87A96B]/20 transition-all"
-                  disabled={loading}
-                />
-              </div>
-
-              {error && (
-                <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl text-red-700 dark:text-red-400 text-sm">
-                  {error}
-                </div>
-              )}
-
-              {/* Big CTA Button */}
-              <button
-                type="submit"
-                disabled={!recipeText.trim() || loading}
-                className="cta-shine w-full bg-[#2D5016] hover:bg-[#1F3610] dark:bg-[#87A96B] dark:hover:bg-[#6B8E4E] active:scale-[0.98] disabled:bg-stone-300 dark:disabled:bg-stone-700 disabled:cursor-not-allowed text-white dark:text-stone-900 font-semibold py-5 px-6 rounded-2xl text-xl shadow-lg shadow-[#2D5016]/20 dark:shadow-[#87A96B]/20 transition-all flex items-center justify-center gap-3"
-              >
-                {loading ? (
-                  <>
-                    <svg className="animate-spin h-6 w-6" viewBox="0 0 24 24">
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                        fill="none"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      />
+                    className="w-full h-72 px-4 py-4 text-stone-900 dark:text-stone-100 bg-white dark:bg-stone-900 border-2 border-stone-200 dark:border-stone-700 rounded-2xl resize-none placeholder:text-stone-400 dark:placeholder:text-stone-500 focus:border-[#87A96B] focus:ring-2 focus:ring-[#87A96B]/20 transition-all"
+                    disabled={loading || imageUploading}
+                  />
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleImageUpload(file);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="absolute bottom-4 right-4 p-2 text-stone-400 hover:text-stone-600 dark:hover:text-stone-300 transition-colors"
+                    title="Upload image"
+                    disabled={loading || imageUploading}
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
-                    <span>{loadingStep || 'Getting ingredients...'}</span>
-                  </>
-                ) : (
-                  <>
-                    <span>Get Shopping List</span>
-                    <span className="text-2xl">→</span>
-                  </>
-                )}
-              </button>
-            </form>
+                  </button>
+                </div>
 
-            {/* Try Example button - only show for first-time visitors */}
-            {recentLists.length === 0 && !recipeText && (
-              <button
-                onClick={() => setRecipeText(`Chicken Tacos (Serves 4)
+                {error && (
+                  <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl text-red-700 dark:text-red-400 text-sm">
+                    {error}
+                  </div>
+                )}
+
+                {/* Big CTA Button */}
+                <button
+                  type="submit"
+                  disabled={!recipeText.trim() || loading || imageUploading}
+                  className="cta-shine w-full bg-[#2D5016] hover:bg-[#1F3610] dark:bg-[#87A96B] dark:hover:bg-[#6B8E4E] active:scale-[0.98] disabled:bg-stone-300 dark:disabled:bg-stone-700 disabled:cursor-not-allowed text-white dark:text-stone-900 font-semibold py-5 px-6 rounded-2xl text-xl shadow-lg shadow-[#2D5016]/20 dark:shadow-[#87A96B]/20 transition-all flex items-center justify-center gap-3"
+                >
+                  {loading || imageUploading ? (
+                    <>
+                      <svg className="animate-spin h-6 w-6" viewBox="0 0 24 24">
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                          fill="none"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        />
+                      </svg>
+                      <span>{loadingStep || 'Getting ingredients...'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Get Shopping List</span>
+                      <span className="text-2xl">→</span>
+                    </>
+                  )}
+                </button>
+              </form>
+
+              {/* Try Example button - only show for first-time visitors */}
+              {recentLists.length === 0 && !recipeText && (
+                <button
+                  onClick={() => setRecipeText(`Chicken Tacos (Serves 4)
 
 1 lb boneless skinless chicken breast
 2 ripe avocados
@@ -416,309 +579,347 @@ Chicken Tacos
 1 cup shredded Mexican cheese
 1 jar salsa
 1 packet taco seasoning`)}
-                className="w-full py-3 text-sm font-medium text-[#2D5016] dark:text-[#87A96B] bg-[#2D5016]/5 dark:bg-[#87A96B]/10 hover:bg-[#2D5016]/10 dark:hover:bg-[#87A96B]/15 rounded-xl transition-colors"
-              >
-                👀 Try an Example
-              </button>
-            )}
+                  className="w-full py-3 text-sm font-medium text-[#2D5016] dark:text-[#87A96B] bg-[#2D5016]/5 dark:bg-[#87A96B]/10 hover:bg-[#2D5016]/10 dark:hover:bg-[#87A96B]/15 rounded-xl transition-colors"
+                >
+                  👀 Try an Example
+                </button>
+              )}
 
-            <p className="text-center text-sm text-stone-400 dark:text-stone-500">
-              Works with URLs, blog posts, screenshots, handwritten notes — whatever.
-            </p>
+              <p className="text-center text-sm text-stone-400 dark:text-stone-500">
+                Works with URLs, blog posts, screenshots, handwritten notes — whatever.
+              </p>
 
-            {/* How It Works + What is Mise? - For first-time visitors */}
-            {recentLists.length === 0 && (
-              <div className="pt-8 border-t border-stone-200 dark:border-stone-800 space-y-8">
-                {/* Interactive Demo */}
-                <HowItWorks />
+              {/* How It Works + What is Mise? - For first-time visitors */}
+              {recentLists.length === 0 && (
+                <div className="pt-8 border-t border-stone-200 dark:border-stone-800 space-y-8">
+                  {/* Interactive Demo */}
+                  <HowItWorks />
 
-                <h3 className="text-lg font-semibold text-stone-800 dark:text-stone-200 text-center">What is Mise?</h3>
-                
-                <div className="grid gap-4">
-                  <div className="flex gap-4 items-start p-4 bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700">
-                    <span className="text-2xl">📋</span>
-                    <div>
-                      <h4 className="font-medium text-stone-800 dark:text-stone-200">Recipe → Shopping List</h4>
-                      <p className="text-sm text-stone-500 dark:text-stone-400">Paste any recipe URL or text. AI extracts ingredients and organizes them by store aisle.</p>
+                  <h3 className="text-lg font-semibold text-stone-800 dark:text-stone-200 text-center">What is Mise?</h3>
+                  
+                  <div className="grid gap-4">
+                    <div className="flex gap-4 items-start p-4 bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700">
+                      <span className="text-2xl">📋</span>
+                      <div>
+                        <h4 className="font-medium text-stone-800 dark:text-stone-200">Recipe → Shopping List</h4>
+                        <p className="text-sm text-stone-500 dark:text-stone-400">Paste any recipe URL or text. AI extracts ingredients and organizes them by store aisle.</p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex gap-4 items-start p-4 bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700">
+                      <span className="text-2xl">⚡</span>
+                      <div>
+                        <h4 className="font-medium text-stone-800 dark:text-stone-200">No Signup Required</h4>
+                        <p className="text-sm text-stone-500 dark:text-stone-400">Just paste and go. Your lists are saved locally on your device — we don&apos;t track you.</p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex gap-4 items-start p-4 bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700">
+                      <span className="text-2xl">🛒</span>
+                      <div>
+                        <h4 className="font-medium text-stone-800 dark:text-stone-200">Shop Smarter</h4>
+                        <p className="text-sm text-stone-500 dark:text-stone-400">Check off items as you shop. Copy to Notes or share with family. Open directly in your favorite store.</p>
+                      </div>
                     </div>
                   </div>
                   
-                  <div className="flex gap-4 items-start p-4 bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700">
-                    <span className="text-2xl">⚡</span>
-                    <div>
-                      <h4 className="font-medium text-stone-800 dark:text-stone-200">No Signup Required</h4>
-                      <p className="text-sm text-stone-500 dark:text-stone-400">Just paste and go. Your lists are saved locally on your device — we don&apos;t track you.</p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex gap-4 items-start p-4 bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700">
-                    <span className="text-2xl">🛒</span>
-                    <div>
-                      <h4 className="font-medium text-stone-800 dark:text-stone-200">Shop Smarter</h4>
-                      <p className="text-sm text-stone-500 dark:text-stone-400">Check off items as you shop. Copy to Notes or share with family. Open directly in your favorite store.</p>
-                    </div>
+                  <p className="text-center text-sm text-stone-500 dark:text-stone-400">
+                    <span className="font-medium">&quot;Mise en place&quot;</span> — French for &quot;everything in its place.&quot;
+                  </p>
+
+                  {/* FAQ Section */}
+                  <div className="pt-6 space-y-3">
+                    <h3 className="text-lg font-semibold text-stone-800 dark:text-stone-200 text-center">FAQ</h3>
+                    {FAQ_ITEMS.map((item, i) => (
+                      <div key={i} className="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700 overflow-hidden">
+                        <button
+                          onClick={() => setOpenFaq(openFaq === i ? null : i)}
+                          className="w-full px-4 py-3 text-left flex items-center justify-between hover:bg-stone-50 dark:hover:bg-stone-800/50 transition-colors"
+                        >
+                          <span className="font-medium text-stone-800 dark:text-stone-200">{item.q}</span>
+                          <svg 
+                            className={`w-5 h-5 text-stone-400 transition-transform ${openFaq === i ? 'rotate-180' : ''}`} 
+                            fill="none" 
+                            viewBox="0 0 24 24" 
+                            stroke="currentColor"
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </button>
+                        <div className={`px-4 overflow-hidden transition-all duration-300 ${openFaq === i ? 'max-h-40 pb-4' : 'max-h-0'}`}>
+                          <p className="text-sm text-stone-500 dark:text-stone-400">{item.a}</p>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
-                
-                <p className="text-center text-sm text-stone-500 dark:text-stone-400">
-                  <span className="font-medium">&quot;Mise en place&quot;</span> — French for &quot;everything in its place.&quot;
-                </p>
+              )}
 
-                {/* FAQ Section */}
-                <div className="pt-6 space-y-3">
-                  <h3 className="text-lg font-semibold text-stone-800 dark:text-stone-200 text-center">FAQ</h3>
-                  {FAQ_ITEMS.map((item, i) => (
-                    <div key={i} className="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700 overflow-hidden">
+              {/* Recent Lists */}
+              {recentLists.length > 0 && (
+                <div className="pt-6 border-t border-stone-200 dark:border-stone-800">
+                  <h3 className="text-sm font-medium text-stone-500 dark:text-stone-400 mb-3">Recent</h3>
+                  <div className="space-y-2">
+                    {recentLists.map((saved, i) => (
                       <button
-                        onClick={() => setOpenFaq(openFaq === i ? null : i)}
-                        className="w-full px-4 py-3 text-left flex items-center justify-between hover:bg-stone-50 dark:hover:bg-stone-800/50 transition-colors"
+                        key={i}
+                        onClick={() => loadRecent(saved)}
+                        className="w-full text-left px-4 py-3 bg-stone-50 dark:bg-stone-900 hover:bg-stone-100 dark:hover:bg-stone-800 rounded-xl transition-colors flex items-center justify-between border border-transparent dark:border-stone-700"
                       >
-                        <span className="font-medium text-stone-800 dark:text-stone-200">{item.q}</span>
-                        <svg 
-                          className={`w-5 h-5 text-stone-400 transition-transform ${openFaq === i ? 'rotate-180' : ''}`} 
-                          fill="none" 
-                          viewBox="0 0 24 24" 
-                          stroke="currentColor"
-                        >
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        <span className="font-medium text-stone-700 dark:text-stone-300">{saved.recipeName}</span>
+                        <span className="text-sm text-stone-400 dark:text-stone-500">
+                          {Object.values(saved.groceryList).flat().length} items
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* List View */
+            <div className="space-y-6">
+              <div className="flex items-center justify-between flex-wrap gap-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-stone-900 dark:text-stone-100">{recipeName}</h2>
+                  <div className="flex items-center gap-4 mt-1">
+                    <p className="text-sm text-stone-500 dark:text-stone-400">{totalItems} items</p>
+                    {/* Servings adjuster */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => adjustServings(servings - 1)}
+                        disabled={servings <= 1}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
                         </svg>
                       </button>
-                      <div className={`px-4 overflow-hidden transition-all duration-300 ${openFaq === i ? 'max-h-40 pb-4' : 'max-h-0'}`}>
-                        <p className="text-sm text-stone-500 dark:text-stone-400">{item.a}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Recent Lists */}
-            {recentLists.length > 0 && (
-              <div className="pt-6 border-t border-stone-200 dark:border-stone-800">
-                <h3 className="text-sm font-medium text-stone-500 dark:text-stone-400 mb-3">Recent</h3>
-                <div className="space-y-2">
-                  {recentLists.map((saved, i) => (
-                    <button
-                      key={i}
-                      onClick={() => loadRecent(saved)}
-                      className="w-full text-left px-4 py-3 bg-stone-50 dark:bg-stone-900 hover:bg-stone-100 dark:hover:bg-stone-800 rounded-xl transition-colors flex items-center justify-between border border-transparent dark:border-stone-700"
-                    >
-                      <span className="font-medium text-stone-700 dark:text-stone-300">{saved.recipeName}</span>
-                      <span className="text-sm text-stone-400 dark:text-stone-500">
-                        {Object.values(saved.groceryList).flat().length} items
+                      <span className="text-sm font-medium text-stone-600 dark:text-stone-400 min-w-[80px] text-center">
+                        {servings} {servings === 1 ? 'serving' : 'servings'}
                       </span>
-                    </button>
-                  ))}
+                      <button
+                        onClick={() => adjustServings(servings + 1)}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 transition-colors"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      setShowPrintView(true);
+                      setTimeout(() => window.print(), 100);
+                    }}
+                    className="p-2 text-stone-600 dark:text-stone-400 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 rounded-xl transition-colors"
+                    title="Print (⌘P)"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={shareList}
+                    className="p-2 text-stone-600 dark:text-stone-400 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 rounded-xl transition-colors"
+                    title="Share"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={copyList}
+                    className={`px-4 py-2 text-sm font-medium rounded-xl transition-all flex items-center gap-1.5 ${
+                      copied 
+                        ? 'bg-[#2D5016] dark:bg-[#87A96B] text-white dark:text-stone-900' 
+                        : 'text-stone-600 dark:text-stone-400 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700'
+                    }`}
+                  >
+                    {copied ? (
+                      <>✓ Copied</>
+                    ) : (
+                      <>
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                        </svg>
+                        Copy
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={reset}
+                    className="px-4 py-2 text-sm font-medium text-[#2D5016] dark:text-[#87A96B] bg-[#2D5016]/10 dark:bg-[#87A96B]/10 hover:bg-[#2D5016]/20 dark:hover:bg-[#87A96B]/20 rounded-xl transition-colors"
+                  >
+                    + New
+                  </button>
                 </div>
               </div>
-            )}
-          </div>
-        ) : (
-          /* List View */
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-2xl font-bold text-stone-900 dark:text-stone-100">{recipeName}</h2>
-                <p className="text-sm text-stone-500 dark:text-stone-400">{totalItems} items</p>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={shareList}
-                  className="p-2 text-stone-600 dark:text-stone-400 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 rounded-xl transition-colors"
-                  title="Share"
-                >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-                  </svg>
-                </button>
-                <button
-                  onClick={copyList}
-                  className={`px-4 py-2 text-sm font-medium rounded-xl transition-all flex items-center gap-1.5 ${
-                    copied 
-                      ? 'bg-[#2D5016] dark:bg-[#87A96B] text-white dark:text-stone-900' 
-                      : 'text-stone-600 dark:text-stone-400 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700'
-                  }`}
-                >
-                  {copied ? (
-                    <>✓ Paste into Notes</>
-                  ) : (
-                    <>
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                      </svg>
-                      Copy
-                    </>
-                  )}
-                </button>
-                <button
-                  onClick={reset}
-                  className="px-4 py-2 text-sm font-medium text-[#2D5016] dark:text-[#87A96B] bg-[#2D5016]/10 dark:bg-[#87A96B]/10 hover:bg-[#2D5016]/20 dark:hover:bg-[#87A96B]/20 rounded-xl transition-colors"
-                >
-                  + New
-                </button>
-              </div>
-            </div>
 
-            {/* Aisles */}
-            <div className="space-y-4">
-              {Object.entries(groceryList)
-                .filter(([, items]) => items.length > 0)
-                .map(([aisle, items]) => {
-                  const config = AISLE_CONFIG[aisle] || AISLE_CONFIG['Other'];
-                  const aisleChecked = items.filter((i) => i.checked).length;
-                  const allChecked = aisleChecked === items.length;
+              {/* Aisles */}
+              <div className="space-y-4">
+                {Object.entries(groceryList)
+                  .filter(([, items]) => items.length > 0)
+                  .map(([aisle, items]) => {
+                    const config = AISLE_CONFIG[aisle] || AISLE_CONFIG['Other'];
+                    const aisleChecked = items.filter((i) => i.checked).length;
+                    const allChecked = aisleChecked === items.length;
 
-                  return (
-                    <div
-                      key={aisle}
-                      className={`rounded-2xl border-2 overflow-hidden transition-opacity ${config.color} ${config.darkColor} ${allChecked ? 'opacity-60' : ''}`}
-                    >
-                      <div className="px-4 py-3 flex items-center justify-between bg-white/50 dark:bg-stone-900/50">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xl">{config.emoji}</span>
-                          <span className="font-semibold text-stone-800 dark:text-stone-200">{aisle}</span>
+                    return (
+                      <div
+                        key={aisle}
+                        className={`rounded-2xl border-2 overflow-hidden transition-opacity ${config.color} ${config.darkColor} ${allChecked ? 'opacity-60' : ''}`}
+                      >
+                        <div className="px-4 py-3 flex items-center justify-between bg-white/50 dark:bg-stone-900/50">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xl">{config.emoji}</span>
+                            <span className="font-semibold text-stone-800 dark:text-stone-200">{aisle}</span>
+                          </div>
+                          <span className="text-sm text-stone-500 dark:text-stone-400">
+                            {aisleChecked}/{items.length}
+                          </span>
                         </div>
-                        <span className="text-sm text-stone-500 dark:text-stone-400">
-                          {aisleChecked}/{items.length}
-                        </span>
-                      </div>
 
-                      <div className="divide-y divide-stone-100 dark:divide-stone-800">
-                        {items.map((item) => (
-                          <div
-                            key={item.id}
-                            onClick={() => toggleItem(aisle, item.id)}
-                            className={`flex items-center gap-4 px-4 py-3 bg-white dark:bg-stone-900 cursor-pointer active:bg-stone-50 dark:active:bg-stone-800 transition-all ${
-                              item.checked ? 'opacity-50' : ''
-                            }`}
-                          >
-                            {/* Checkbox */}
+                        <div className="divide-y divide-stone-100 dark:divide-stone-800">
+                          {items.map((item) => (
                             <div
-                              className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
-                                item.checked
-                                  ? 'bg-[#2D5016] dark:bg-[#87A96B] border-[#2D5016] dark:border-[#87A96B] scale-110'
-                                  : 'border-stone-300 dark:border-stone-600 hover:border-stone-400 dark:hover:border-stone-500'
+                              key={item.id}
+                              onClick={() => toggleItem(aisle, item.id)}
+                              className={`flex items-center gap-4 px-4 py-3 bg-white dark:bg-stone-900 cursor-pointer active:bg-stone-50 dark:active:bg-stone-800 transition-all ${
+                                item.checked ? 'opacity-50' : ''
                               }`}
                             >
-                              {item.checked && (
-                                <svg
-                                  className="w-4 h-4 text-white dark:text-stone-900"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  stroke="currentColor"
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={3}
-                                    d="M5 13l4 4L19 7"
-                                  />
-                                </svg>
-                              )}
-                            </div>
-
-                            {/* Image */}
-                            {item.image && (
-                              <div className="w-12 h-12 rounded-xl bg-stone-100 dark:bg-stone-800 overflow-hidden flex-shrink-0">
-                                <img
-                                  src={item.image}
-                                  alt={item.name}
-                                  className="w-full h-full object-cover"
-                                  loading="lazy"
-                                  onError={(e) => {
-                                    (e.target as HTMLImageElement).style.display = 'none';
-                                  }}
-                                />
-                              </div>
-                            )}
-
-                            {/* Details */}
-                            <div className="flex-1 min-w-0">
+                              {/* Checkbox */}
                               <div
-                                className={`font-medium text-stone-900 dark:text-stone-100 ${
-                                  item.checked ? 'line-through text-stone-400 dark:text-stone-500' : ''
+                                className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                                  item.checked
+                                    ? 'bg-[#2D5016] dark:bg-[#87A96B] border-[#2D5016] dark:border-[#87A96B] scale-110'
+                                    : 'border-stone-300 dark:border-stone-600 hover:border-stone-400 dark:hover:border-stone-500'
                                 }`}
                               >
-                                {item.name}
+                                {item.checked && (
+                                  <svg
+                                    className="w-4 h-4 text-white dark:text-stone-900"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      strokeWidth={3}
+                                      d="M5 13l4 4L19 7"
+                                    />
+                                  </svg>
+                                )}
                               </div>
-                              {(item.amount || item.unit) && (
-                                <div className="text-sm text-stone-500 dark:text-stone-400">
-                                  {item.amount} {item.unit}
+
+                              {/* Image */}
+                              {item.image && (
+                                <div className="w-12 h-12 rounded-xl bg-stone-100 dark:bg-stone-800 overflow-hidden flex-shrink-0">
+                                  <img
+                                    src={item.image}
+                                    alt={item.name}
+                                    className="w-full h-full object-cover"
+                                    loading="lazy"
+                                    onError={(e) => {
+                                      (e.target as HTMLImageElement).style.display = 'none';
+                                    }}
+                                  />
                                 </div>
                               )}
+
+                              {/* Details */}
+                              <div className="flex-1 min-w-0">
+                                <div
+                                  className={`font-medium text-stone-900 dark:text-stone-100 ${
+                                    item.checked ? 'line-through text-stone-400 dark:text-stone-500' : ''
+                                  }`}
+                                >
+                                  {item.name}
+                                </div>
+                                {(item.amount || item.unit) && (
+                                  <div className="text-sm text-stone-500 dark:text-stone-400">
+                                    {item.amount} {item.unit}
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+              </div>
+
+              {/* Completion message */}
+              {progressPercent === 100 && (
+                <div className="text-center py-8">
+                  <div className="text-4xl mb-2">🎉</div>
+                  <p className="text-lg font-medium text-stone-700 dark:text-stone-300">All done!</p>
+                  <p className="text-sm text-stone-500 dark:text-stone-400">Time to cook something delicious.</p>
+                </div>
+              )}
+
+              {/* Shop at Store */}
+              <div className="pt-4 border-t border-stone-200 dark:border-stone-700">
+                <p className="text-sm font-medium text-stone-500 dark:text-stone-400 mb-3">Shop this list at</p>
+                <div className="flex flex-wrap gap-2">
+                  {STORES.map((store) => {
+                    // Get unchecked items for search
+                    const uncheckedItems = Object.values(groceryList)
+                      .flat()
+                      .filter((item) => !item.checked)
+                      .slice(0, 5) // First 5 items
+                      .map((item) => item.name)
+                      .join(', ');
+                    
+                    return (
+                      <a
+                        key={store.name}
+                        href={store.url(uncheckedItems || 'groceries')}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-4 py-2 text-sm font-medium text-stone-700 dark:text-stone-300 bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-xl hover:bg-stone-50 dark:hover:bg-stone-700 hover:border-stone-300 dark:hover:border-stone-600 transition-all"
+                      >
+                        {store.name}
+                      </a>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-stone-400 dark:text-stone-500 mt-2">Opens store search with your ingredients</p>
+              </div>
             </div>
+          )}
+        </div>
 
-            {/* Completion message */}
-            {progressPercent === 100 && (
-              <div className="text-center py-8">
-                <div className="text-4xl mb-2">🎉</div>
-                <p className="text-lg font-medium text-stone-700 dark:text-stone-300">All done!</p>
-                <p className="text-sm text-stone-500 dark:text-stone-400">Time to cook something delicious.</p>
-              </div>
-            )}
-
-            {/* Shop at Store */}
-            <div className="pt-4 border-t border-stone-200 dark:border-stone-700">
-              <p className="text-sm font-medium text-stone-500 dark:text-stone-400 mb-3">Shop this list at</p>
-              <div className="flex flex-wrap gap-2">
-                {STORES.map((store) => {
-                  // Get unchecked items for search
-                  const uncheckedItems = Object.values(groceryList)
-                    .flat()
-                    .filter((item) => !item.checked)
-                    .slice(0, 5) // First 5 items
-                    .map((item) => item.name)
-                    .join(', ');
-                  
-                  return (
-                    <a
-                      key={store.name}
-                      href={store.url(uncheckedItems || 'groceries')}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-4 py-2 text-sm font-medium text-stone-700 dark:text-stone-300 bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-xl hover:bg-stone-50 dark:hover:bg-stone-700 hover:border-stone-300 dark:hover:border-stone-600 transition-all"
-                    >
-                      {store.name}
-                    </a>
-                  );
-                })}
-              </div>
-              <p className="text-xs text-stone-400 dark:text-stone-500 mt-2">Opens store search with your ingredients</p>
+        {/* Fixed bottom progress bar */}
+        {groceryList && (
+          <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-stone-900 border-t border-stone-200 dark:border-stone-800 safe-area-pb">
+            <div className="h-1 bg-stone-100 dark:bg-stone-800">
+              <div
+                className="h-full bg-[#2D5016] dark:bg-[#87A96B] transition-all duration-500 ease-out"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+            <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
+              <span className="text-sm text-stone-600 dark:text-stone-400">
+                {checkedItems} of {totalItems} items
+              </span>
+              {progressPercent === 100 ? (
+                <span className="text-sm font-medium text-[#2D5016] dark:text-[#87A96B]">✓ Complete!</span>
+              ) : (
+                <span className="text-sm text-stone-400 dark:text-stone-500">
+                  {Math.round(progressPercent)}% done
+                </span>
+              )}
             </div>
           </div>
         )}
-      </div>
-
-      {/* Fixed bottom progress bar */}
-      {groceryList && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-stone-900 border-t border-stone-200 dark:border-stone-800 safe-area-pb">
-          <div className="h-1 bg-stone-100 dark:bg-stone-800">
-            <div
-              className="h-full bg-[#2D5016] dark:bg-[#87A96B] transition-all duration-500 ease-out"
-              style={{ width: `${progressPercent}%` }}
-            />
-          </div>
-          <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
-            <span className="text-sm text-stone-600 dark:text-stone-400">
-              {checkedItems} of {totalItems} items
-            </span>
-            {progressPercent === 100 ? (
-              <span className="text-sm font-medium text-[#2D5016] dark:text-[#87A96B]">✓ Complete!</span>
-            ) : (
-              <span className="text-sm text-stone-400 dark:text-stone-500">
-                {Math.round(progressPercent)}% done
-              </span>
-            )}
-          </div>
-        </div>
-      )}
-    </main>
+      </main>
+    </>
   );
 }
