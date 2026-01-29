@@ -1,10 +1,8 @@
-import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 import { NextResponse } from 'next/server';
-import { getClientIP, checkRateLimit } from '@/lib/rateLimit';
-import { logUsage, calculateCost } from '@/lib/usageLogger';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
 // Spoonacular ingredient image base URL
@@ -300,7 +298,7 @@ async function fetchRecipeFromUrl(url: string): Promise<string> {
     const html = await response.text();
     
     // Extract text content, removing scripts and styles
-    // Simple extraction - OpenAI will handle the parsing
+    // Simple extraction - Claude will handle the parsing
     const textContent = html
       .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
       .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
@@ -351,33 +349,6 @@ export async function POST(request: Request) {
   // Extract metadata from request
   const userAgent = request.headers.get('user-agent') || undefined;
   const country = request.headers.get('x-vercel-ip-country') || undefined;
-  const clientId = getClientIP(request);
-  
-  // Check rate limit
-  const rateLimit = checkRateLimit(clientId);
-  
-  if (!rateLimit.allowed) {
-    const resetInMinutes = Math.ceil((rateLimit.resetTime - Date.now()) / 60000);
-    const dailyResetInHours = Math.ceil((rateLimit.dailyResetTime - Date.now()) / 3600000);
-    
-    return NextResponse.json(
-      { 
-        error: `Rate limit exceeded. You can make ${rateLimit.remaining} more requests per hour (resets in ${resetInMinutes} min) and ${rateLimit.dailyRemaining} more requests today (resets in ${dailyResetInHours}h). Please try again later.`,
-        rateLimitExceeded: true,
-        resetTime: rateLimit.resetTime,
-        dailyResetTime: rateLimit.dailyResetTime,
-      },
-      { 
-        status: 429,
-        headers: {
-          'X-RateLimit-Remaining': String(rateLimit.remaining),
-          'X-RateLimit-Reset': String(rateLimit.resetTime),
-          'X-RateLimit-Daily-Remaining': String(rateLimit.dailyRemaining),
-          'X-RateLimit-Daily-Reset': String(rateLimit.dailyResetTime),
-        },
-      }
-    );
-  }
   
   try {
     const { recipeText } = await request.json();
@@ -425,18 +396,13 @@ RULES:
 - Exclude plain water unless specifically measured as an ingredient
 - Include salt, pepper, and basic seasonings if they have specific measurements`;
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
+    const message = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
       max_tokens: 2048,
-      temperature: 0.3,
+      messages: [{ role: 'user', content: prompt }],
     });
 
-    const responseText = completion.choices[0]?.message?.content || '';
-    const inputTokens = completion.usage?.prompt_tokens || 0;
-    const outputTokens = completion.usage?.completion_tokens || 0;
-    const totalTokens = completion.usage?.total_tokens || 0;
-    const cost = calculateCost(inputTokens, outputTokens);
+    const responseText = message.content[0].type === 'text' ? message.content[0].text : '';
     
     // Parse the JSON response
     let parsed;
@@ -449,23 +415,7 @@ RULES:
         throw new Error('No JSON found in response');
       }
     } catch {
-      console.error('Failed to parse OpenAI response:', responseText);
-      
-      // Log failed usage
-      logUsage({
-        timestamp: new Date().toISOString(),
-        clientId,
-        inputTokens,
-        outputTokens,
-        totalTokens,
-        costUSD: cost,
-        model: 'gpt-4o-mini',
-        success: false,
-        error: 'JSON parse error',
-        country,
-        inputType: isFromUrl ? 'url' : 'text',
-      });
-      
+      console.error('Failed to parse Claude response:', responseText);
       return NextResponse.json(
         { error: 'Could not parse the recipe. Try a different format?' },
         { status: 500 }
@@ -543,22 +493,6 @@ RULES:
       userAgent,
       country,
     });
-    
-    // Log successful usage
-    logUsage({
-      timestamp: new Date().toISOString(),
-      clientId,
-      inputTokens,
-      outputTokens,
-      totalTokens,
-      costUSD: cost,
-      model: 'gpt-4o-mini',
-      success: true,
-      recipeName: parsed.recipeName || 'Recipe',
-      ingredientCount: allIngredients.length,
-      country,
-      inputType: isFromUrl ? 'url' : 'text',
-    });
 
     return NextResponse.json({ 
       groceryList: sortedGroceryList,
@@ -567,21 +501,6 @@ RULES:
     });
   } catch (error) {
     console.error('Parse error:', error);
-    
-    // Log failed usage (best effort)
-    logUsage({
-      timestamp: new Date().toISOString(),
-      clientId,
-      inputTokens: 0,
-      outputTokens: 0,
-      totalTokens: 0,
-      costUSD: 0,
-      model: 'gpt-4o-mini',
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
-      country,
-    });
-    
     const errorMessage = error instanceof Error ? error.message : 'Something went wrong. Please try again.';
     return NextResponse.json(
       { error: errorMessage },
