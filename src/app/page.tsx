@@ -401,6 +401,27 @@ Chicken Tacos
               </button>
             </form>
 
+            {/* Try Example button - only show for first-time visitors */}
+            {recentLists.length === 0 && !recipeText && (
+              <button
+                onClick={() => setRecipeText(`Chicken Tacos (Serves 4)
+
+1 lb boneless skinless chicken breast
+2 ripe avocados
+1 bunch fresh cilantro
+8 corn tortillas
+2 limes
+1 cup shredded lettuce
+1/2 cup sour cream
+1 cup shredded Mexican cheese
+1 jar salsa
+1 packet taco seasoning`)}
+                className="w-full py-3 text-sm font-medium text-[#2D5016] dark:text-[#87A96B] bg-[#2D5016]/5 dark:bg-[#87A96B]/10 hover:bg-[#2D5016]/10 dark:hover:bg-[#87A96B]/15 rounded-xl transition-colors"
+              >
+                👀 Try an Example
+              </button>
+            )}
+
             <p className="text-center text-sm text-stone-400 dark:text-stone-500">
               Works with URLs, blog posts, screenshots, handwritten notes — whatever.
             </p>
