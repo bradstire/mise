@@ -54,11 +54,15 @@ const FAQ_ITEMS = [
   },
   {
     q: "Is my data private?",
-    a: "Yes. Your grocery lists are stored locally on your device. We don't create accounts, track you, or sell your data. The only external call is to parse your recipe."
+    a: "Yes. Your grocery lists are stored locally on your device. We collect minimal, anonymous usage data to monitor costs. No accounts, no personal information, no cross-session tracking."
   },
   {
     q: "Is Mise really free?",
     a: "Yep, completely free. No premium tier, no ads, no catch. We built it because we wanted it to exist."
+  },
+  {
+    q: "Who built Mise?",
+    a: "Hey, I'm Brad. Like you, I cook at home and got frustrated with existing recipe apps. Other recipe sites are great, but they require accounts and cost money. I just wanted to paste a recipe and get a grocery list. So I built Mise. Free. Private. Simple."
   }
 ];
 
