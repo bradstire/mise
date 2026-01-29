@@ -85,18 +85,19 @@ export default function Home() {
   const [darkMode, setDarkMode] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
 
-  // Initialize dark mode from localStorage/system preference
+  // Initialize dark mode from localStorage (default to light)
   useEffect(() => {
     const stored = localStorage.getItem('mise-theme');
     if (stored === 'dark') {
       setDarkMode(true);
       document.documentElement.classList.add('dark');
-    } else if (stored === 'light') {
+    } else {
+      // Default to light mode
       setDarkMode(false);
       document.documentElement.classList.remove('dark');
-    } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      setDarkMode(true);
-      document.documentElement.classList.add('dark');
+      if (!stored) {
+        localStorage.setItem('mise-theme', 'light');
+      }
     }
   }, []);
 
